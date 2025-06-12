@@ -35,13 +35,13 @@ type JsonEntry struct {
 }
 
 func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtypes.TipSet, outFh io.Writer, asSingleDocument bool) error {
-	log.Debug("Starting DumpStateF05")
+	log.Info("Starting DumpStateF05")
 
 	// POSIX pipe writes are not atomic after certain size, we need a synchronizer not to tear the json
 	// run the worker in an outer errgroup to allow for all producers to shut down first
 	writeSink := make(chan []byte, 8<<10)
 	egOuter, ctx := errgroup.WithContext(ctx)
-	log.Debug("Launching writeWorker goroutine")
+	log.Info("Launching writeWorker goroutine")
 	egOuter.Go(func() error { return writeWorker(ctx, writeSink, outFh, asSingleDocument) })
 
 	egInner, ctx := errgroup.WithContext(ctx)
@@ -51,39 +51,39 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 	} else if wrkCnt > 12 {
 		wrkCnt = 12 // do not overwhelm the block provider
 	}
-	log.Debugf("Worker count set to %d", wrkCnt)
+	log.Infof("Worker count set to %d", wrkCnt)
 	egInner.SetLimit(wrkCnt)
 
 	//
 	// begin actual chain-reading logic
 	//
-	log.Debug("Creating CBOR store")
+	log.Info("Creating CBOR store")
 	cbs := ipldcbor.NewCborStore(bg)
 
-	log.Debug("Getting StorageMarketActor from TipSet")
+	log.Info("Getting StorageMarketActor from TipSet")
 	f05act, err := GetActorGeneric(cbs, ts, filbuiltin.StorageMarketActorAddr)
 	if err != nil {
-		log.Debugf("Error getting actor: %v", err)
+		log.Infof("Error getting actor: %v", err)
 		return err
 	}
-	log.Debug("Loading StorageMarketActor state")
+	log.Info("Loading StorageMarketActor state")
 	f05state, err := lchmarket.Load(lchadt.WrapStore(ctx, cbs), f05act)
 	if err != nil {
-		log.Debugf("Error loading actor state: %v", err)
+		log.Infof("Error loading actor state: %v", err)
 		return err
 	}
 
-	log.Debug("Loading Proposals from state")
+	log.Info("Loading Proposals from state")
 	proposals, err := f05state.Proposals()
 	if err != nil {
-		log.Debugf("Error loading proposals: %v", err)
+		log.Infof("Error loading proposals: %v", err)
 		return err
 	}
 
-	log.Debug("Loading DealStates from state")
+	log.Info("Loading DealStates from state")
 	states, err := f05state.States()
 	if err != nil {
-		log.Debugf("Error loading states: %v", err)
+		log.Infof("Error loading states: %v", err)
 		return err
 	}
 
@@ -100,14 +100,14 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 		//
 		// Blockers are this PR and its deps: https://github.com/filecoin-project/go-amt-ipld/pull/84
 		//
-		log.Debug("Iterating over proposals")
+		log.Info("Iterating over proposals")
 		return proposals.ForEach(func(did filabi.DealID, dp lchmarket.DealProposal) error {
 
 			// keep count, also to deal with trailing comma in case of asSingleDocument
 			isFirst := (cnt.Add(1) == 1)
 
 			egInner.Go(func() error {
-				log.Debugf("Processing deal ID %d", did)
+				log.Infof("Processing deal ID %d", did)
 
 				// https://github.com/filecoin-project/lotus/blob/v1.30.0/chain/actors/builtin/market/market.go#L306-L320
 				mds := MarketDealState{
@@ -118,7 +118,7 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 				}
 				s, found, err := states.Get(did)
 				if err != nil {
-					log.Debugf("Error getting state for deal ID %d: %v", did, err)
+					log.Infof("Error getting state for deal ID %d: %v", did, err)
 					return err
 				}
 				if found {
@@ -140,7 +140,7 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 
 				enc, err := json.Marshal(toEnc)
 				if err != nil {
-					log.Debugf("Error marshaling JSON for deal ID %d: %v", did, err)
+					log.Infof("Error marshaling JSON for deal ID %d: %v", did, err)
 					return err
 				}
 
@@ -159,10 +159,10 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 
 				select {
 				case <-ctx.Done():
-					log.Debugf("Context cancelled while writing deal ID %d", did)
+					log.Infof("Context cancelled while writing deal ID %d", did)
 					return nil
 				case writeSink <- encFin:
-					log.Debugf("Deal ID %d written to sink", did)
+					log.Infof("Deal ID %d written to sink", did)
 				}
 
 				return nil
@@ -171,28 +171,28 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 		})
 	})
 
-	log.Debug("Waiting for inner group to complete")
+	log.Info("Waiting for inner group to complete")
 	innerErr := egInner.Wait()
-	log.Debug("Inner group done, closing writeSink")
+	log.Info("Inner group done, closing writeSink")
 	close(writeSink)
 
-	log.Debug("Waiting for outer group to complete")
+	log.Info("Waiting for outer group to complete")
 	outerErr := egOuter.Wait()
 
 	if innerErr != nil {
-		log.Debugf("Inner group returned error: %v", innerErr)
+		log.Infof("Inner group returned error: %v", innerErr)
 		return innerErr
 	} else if outerErr != nil {
-		log.Debugf("Outer group returned error: %v", outerErr)
+		log.Infof("Outer group returned error: %v", outerErr)
 		return outerErr
 	}
 
-	log.Debug("DumpStateF05 completed successfully")
+	log.Info("DumpStateF05 completed successfully")
 	return nil
 }
 
 func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleDocument bool) (defErr error) {
-	log.Debug("writeWorker: starting")
+	log.Info("writeWorker: starting")
 
 	// Create a buffered writer with 1 MiB buffer size for performance
 	buf := bufio.NewWriterSize(out, 1<<20)
@@ -200,21 +200,21 @@ func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleD
 	// Ensure buffer is flushed on exit
 	defer func() {
 		if defErr == nil {
-			log.Debug("writeWorker: flushing buffer")
+			log.Info("writeWorker: flushing buffer")
 			defErr = buf.Flush()
 		}
 	}()
 
 	// If writing a single JSON document, write the opening part of the JSON-RPC response
 	if asSingleDocument {
-		log.Debug("writeWorker: writing opening JSON-RPC envelope")
+		log.Info("writeWorker: writing opening JSON-RPC envelope")
 		if _, err := buf.Write([]byte(`{"id":1,"jsonrpc":"2.0","result":{`)); err != nil {
-			log.Debugf("writeWorker: error writing JSON-RPC header: %v", err)
+			log.Infof("writeWorker: error writing JSON-RPC header: %v", err)
 			return err
 		}
 		// Ensure we write the closing part at the end
 		defer func() {
-			log.Debug("writeWorker: writing closing JSON-RPC envelope")
+			log.Info("writeWorker: writing closing JSON-RPC envelope")
 			_, err := buf.Write([]byte("}}\n"))
 			if defErr == nil {
 				defErr = err
@@ -227,16 +227,16 @@ func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleD
 		select {
 		case b, isOpen := <-in:
 			if !isOpen {
-				log.Debug("writeWorker: input channel closed")
+				log.Info("writeWorker: input channel closed")
 				return nil
 			}
-			log.Debugf("writeWorker: writing %d bytes to buffer", len(b))
+			log.Infof("writeWorker: writing %d bytes to buffer", len(b))
 			if _, err := buf.Write(b); err != nil {
-				log.Debugf("writeWorker: error writing to buffer: %v", err)
+				log.Infof("writeWorker: error writing to buffer: %v", err)
 				return err
 			}
 		case <-ctx.Done():
-			log.Debug("writeWorker: context cancelled")
+			log.Info("writeWorker: context cancelled")
 			return nil
 		}
 	}
