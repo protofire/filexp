@@ -192,7 +192,6 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 }
 
 func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleDocument bool) (defErr error) {
-	log.Info("writeWorker: starting")
 
 	// Create a buffered writer with 1 MiB buffer size for performance
 	buf := bufio.NewWriterSize(out, 1<<20)
@@ -200,21 +199,18 @@ func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleD
 	// Ensure buffer is flushed on exit
 	defer func() {
 		if defErr == nil {
-			log.Info("writeWorker: flushing buffer")
 			defErr = buf.Flush()
 		}
 	}()
 
 	// If writing a single JSON document, write the opening part of the JSON-RPC response
 	if asSingleDocument {
-		log.Info("writeWorker: writing opening JSON-RPC envelope")
 		if _, err := buf.Write([]byte(`{"id":1,"jsonrpc":"2.0","result":{`)); err != nil {
-			log.Infof("writeWorker: error writing JSON-RPC header: %v", err)
+			log.Errorf("writeWorker: error writing JSON-RPC header: %v", err)
 			return err
 		}
 		// Ensure we write the closing part at the end
 		defer func() {
-			log.Info("writeWorker: writing closing JSON-RPC envelope")
 			_, err := buf.Write([]byte("}}\n"))
 			if defErr == nil {
 				defErr = err
@@ -227,16 +223,14 @@ func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleD
 		select {
 		case b, isOpen := <-in:
 			if !isOpen {
-				log.Info("writeWorker: input channel closed")
 				return nil
 			}
-			log.Infof("writeWorker: writing %d bytes to buffer", len(b))
 			if _, err := buf.Write(b); err != nil {
-				log.Infof("writeWorker: error writing to buffer: %v", err)
+				log.Errorf("writeWorker: error writing to buffer: %v", err)
 				return err
 			}
 		case <-ctx.Done():
-			log.Info("writeWorker: context cancelled")
+			log.Warn("writeWorker: context cancelled")
 			return nil
 		}
 	}
