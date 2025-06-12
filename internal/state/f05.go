@@ -63,27 +63,27 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 	log.Info("Getting StorageMarketActor from TipSet")
 	f05act, err := GetActorGeneric(cbs, ts, filbuiltin.StorageMarketActorAddr)
 	if err != nil {
-		log.Infof("Error getting actor: %v", err)
+		log.Errorf("Error getting actor: %v", err)
 		return err
 	}
 	log.Info("Loading StorageMarketActor state")
 	f05state, err := lchmarket.Load(lchadt.WrapStore(ctx, cbs), f05act)
 	if err != nil {
-		log.Infof("Error loading actor state: %v", err)
+		log.Errorf("Error loading actor state: %v", err)
 		return err
 	}
 
 	log.Info("Loading Proposals from state")
 	proposals, err := f05state.Proposals()
 	if err != nil {
-		log.Infof("Error loading proposals: %v", err)
+		log.Errorf("Error loading proposals: %v", err)
 		return err
 	}
 
 	log.Info("Loading DealStates from state")
 	states, err := f05state.States()
 	if err != nil {
-		log.Infof("Error loading states: %v", err)
+		log.Errorf("Error loading states: %v", err)
 		return err
 	}
 
