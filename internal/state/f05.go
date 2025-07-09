@@ -99,6 +99,7 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 
 	egInner.Go(func() error {
 		var cnt atomic.Int64
+		var verifiedCnt atomic.Int64
 
 		// Currently this takes ~2 minutes for a `return nil` noop via a car file 🪦
 		// It should take ~10 seconds instead (based on napking math over tree size, 2.7M blocks)
@@ -176,6 +177,16 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 				}
 
 				if dp.VerifiedDeal && verifiedWriteSink != nil {
+					isFirstVerified := (verifiedCnt.Add(1) == 1)
+
+					encCopy := make([]byte, len(encFin))
+					copy(encCopy, encFin)
+
+					if asSingleDocument {
+						if !isFirstVerified {
+							encCopy = append([]byte(","), encCopy...)
+						}
+					}
 					select {
 					case <-ctx.Done():
 					case verifiedWriteSink <- encFin:
