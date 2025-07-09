@@ -34,8 +34,12 @@ type JsonEntry struct {
 	State    MarketDealState
 }
 
-func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtypes.TipSet, outFh io.Writer, asSingleDocument bool) error {
+func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtypes.TipSet, outFh io.Writer, asSingleDocument bool, extra ...io.Writer) error {
 	log.Info("Starting DumpStateF05")
+	var verifiedOnlyOutFh io.Writer
+	if len(extra) > 0 {
+		verifiedOnlyOutFh = extra[0]
+	}
 
 	// POSIX pipe writes are not atomic after certain size, we need a synchronizer not to tear the json
 	// run the worker in an outer errgroup to allow for all producers to shut down first
@@ -43,6 +47,12 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 	egOuter, ctx := errgroup.WithContext(ctx)
 	log.Info("Launching writeWorker goroutine")
 	egOuter.Go(func() error { return writeWorker(ctx, writeSink, outFh, asSingleDocument) })
+
+	var verifiedWriteSink chan []byte
+	if verifiedOnlyOutFh != nil {
+		verifiedWriteSink = make(chan []byte, 8<<10)
+		egOuter.Go(func() error { return writeWorker(ctx, verifiedWriteSink, verifiedOnlyOutFh, asSingleDocument) })
+	}
 
 	egInner, ctx := errgroup.WithContext(ctx)
 	wrkCnt := runtime.NumCPU()
@@ -165,6 +175,13 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 					log.Infof("Deal ID %d written to sink", did)
 				}
 
+				if dp.VerifiedDeal && verifiedWriteSink != nil {
+					select {
+					case <-ctx.Done():
+					case verifiedWriteSink <- encFin:
+					}
+				}
+
 				return nil
 			})
 			return nil
@@ -177,6 +194,9 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 	close(writeSink)
 
 	log.Info("Waiting for outer group to complete")
+	if verifiedWriteSink != nil {
+		close(verifiedWriteSink)
+	}
 	outerErr := egOuter.Wait()
 
 	if innerErr != nil {
@@ -205,13 +225,13 @@ func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleD
 
 	// If writing a single JSON document, write the opening part of the JSON-RPC response
 	if asSingleDocument {
-		if _, err := buf.Write([]byte(`{"id":1,"jsonrpc":"2.0","result":{`)); err != nil {
+		if _, err := buf.Write([]byte(`{`)); err != nil {
 			log.Errorf("writeWorker: error writing JSON-RPC header: %v", err)
 			return err
 		}
 		// Ensure we write the closing part at the end
 		defer func() {
-			_, err := buf.Write([]byte("}}\n"))
+			_, err := buf.Write([]byte("}\n"))
 			if defErr == nil {
 				defErr = err
 			}
