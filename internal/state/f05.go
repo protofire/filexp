@@ -179,14 +179,25 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 				if dp.VerifiedDeal && verifiedWriteSink != nil {
 					isFirstVerified := (verifiedCnt.Add(1) == 1)
 
-					encCopy := make([]byte, len(encFin))
-					copy(encCopy, encFin)
+				var encCopy []byte
+				if asSingleDocument {
+					if isFirstVerified {
+						encCopy = make([]byte, len(encFin))
+						copy(encCopy, encFin)
+					} else {
+						encCopy = make([]byte, 0, len(encFin)+1)
+						encCopy = append(encCopy, ',')
 
-					if asSingleDocument {
-						if !isFirstVerified {
-							encCopy = append([]byte(","), encCopy...)
-						}
+						tmp := make([]byte, len(encFin))
+						copy(tmp, encFin)
+						encCopy = append(encCopy, tmp...)
 					}
+				} else {
+					encCopy = make([]byte, len(encFin))
+					copy(encCopy, encFin)
+				}
+
+
 					select {
 					case <-ctx.Done():
 					case verifiedWriteSink <- encCopy:
