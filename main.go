@@ -13,9 +13,7 @@ import (
 	filaddr "github.com/filecoin-project/go-address"
 	filbuiltin "github.com/filecoin-project/go-state-types/builtin"
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/xerrors"
 )
 
 var log = filexp.Logger
