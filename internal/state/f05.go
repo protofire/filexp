@@ -176,33 +176,35 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 					log.Infof("Deal ID %d written to sink", did)
 				}
 
-				if dp.VerifiedDeal && verifiedWriteSink != nil {
-					isFirstVerified := (verifiedCnt.Add(1) == 1)
+                                if dp.VerifiedDeal && verifiedWriteSink != nil {
+                                        isFirstVerified := (verifiedCnt.Add(1) == 1)
 
-				var encCopy []byte
-				if asSingleDocument {
-					if isFirstVerified {
-						encCopy = make([]byte, len(encFin))
-						copy(encCopy, encFin)
-					} else {
-						encCopy = make([]byte, 0, len(encFin)+1)
-						encCopy = append(encCopy, ',')
+                                        var encCopy []byte
+                                        if asSingleDocument {
+                                                if isFirstVerified {
+                                                        start := 0
+                                                        if len(encFin) > 0 && encFin[0] == ',' {
+                                                                start = 1
+                                                        }
+                                                        encCopy = make([]byte, len(encFin)-start)
+                                                        copy(encCopy, encFin[start:])
+                                                } else {
+                                                        encCopy = make([]byte, 0, len(encFin)+1)
+                                                        encCopy = append(encCopy, ',')
+                                                        tmp := make([]byte, len(encFin))
+                                                        copy(tmp, encFin)
+                                                        encCopy = append(encCopy, tmp...)
+                                                }
+                                        } else {
+                                                encCopy = make([]byte, len(encFin))
+                                                copy(encCopy, encFin)
+                                        }
 
-						tmp := make([]byte, len(encFin))
-						copy(tmp, encFin)
-						encCopy = append(encCopy, tmp...)
-					}
-				} else {
-					encCopy = make([]byte, len(encFin))
-					copy(encCopy, encFin)
-				}
-
-
-					select {
-					case <-ctx.Done():
-					case verifiedWriteSink <- encCopy:
-					}
-				}
+                                        select {
+                                        case <-ctx.Done():
+                                        case verifiedWriteSink <- encCopy:
+                                        }
+                                }
 
 				return nil
 			})
