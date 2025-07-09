@@ -189,7 +189,7 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 					}
 					select {
 					case <-ctx.Done():
-					case verifiedWriteSink <- encFin:
+					case verifiedWriteSink <- encCopy:
 					}
 				}
 
