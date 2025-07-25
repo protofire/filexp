@@ -13,9 +13,7 @@ import (
 	filaddr "github.com/filecoin-project/go-address"
 	filbuiltin "github.com/filecoin-project/go-state-types/builtin"
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/xerrors"
 )
 
 var log = filexp.Logger
@@ -170,19 +168,59 @@ func main() {
 						Value:       false,
 						DefaultText: "emit an inefficient single JSON object identical to result of StateMarketDeals",
 					},
+					&cli.StringFlag{
+						Name:     "output",
+						Usage:    "File path for full deals output",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:     "verified-output",
+						Usage:    "Optional: File path for verified-only deals output",
+						Required: false,
+					},
 				}, stateFlags...),
 				Action: func(cctx *cli.Context) error {
-					if isatty.IsTerminal(os.Stdout.Fd()) {
-						return xerrors.New("dumping to terminal is not supported - redirect the output to file or pipe")
-					}
-
 					bg, ts, err := getAnchorPoint(cctx)
 					if err != nil {
 						return err
 					}
 					defer bg.LogStats()
 
-					return state.DumpStateF05(cctx.Context, bg, ts, os.Stdout, cctx.Bool("single-document"))
+					fullOutputPath := cctx.String("output")
+					fullFile, err := os.Create(fullOutputPath)
+					if err != nil {
+						return err
+					}
+					defer fullFile.Close()
+
+					var verifiedFile *os.File
+					var verifiedOutputPath string
+
+					if cctx.IsSet("verified-output") {
+						verifiedOutputPath = cctx.String("verified-output")
+						verifiedFile, err = os.Create(verifiedOutputPath)
+						if err != nil {
+							return err
+						}
+						defer verifiedFile.Close()
+
+						return state.DumpStateF05(
+							cctx.Context,
+							bg,
+							ts,
+							fullFile,
+							cctx.Bool("single-document"),
+							verifiedFile,
+						)
+					}
+
+					return state.DumpStateF05(
+						cctx.Context,
+						bg,
+						ts,
+						fullFile,
+						cctx.Bool("single-document"),
+					)
 				},
 			},
 			{

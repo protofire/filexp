@@ -31,12 +31,23 @@ type JsonEntry struct {
 	State    MarketDealState
 }
 
-func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtypes.TipSet, outFh io.Writer, asSingleDocument bool) error {
+func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtypes.TipSet, outFh io.Writer, asSingleDocument bool, extra ...io.Writer) error {
+	var verifiedOnlyOutFh io.Writer
+	if len(extra) > 0 {
+		verifiedOnlyOutFh = extra[0]
+	}
+
 	// POSIX pipe writes are not atomic after certain size, we need a synchronizer not to tear the json
 	// run the worker in an outer errgroup to allow for all producers to shut down first
 	writeSink := make(chan []byte, 8<<10)
 	egOuter, ctx := errgroup.WithContext(ctx)
 	egOuter.Go(func() error { return writeWorker(ctx, writeSink, outFh, asSingleDocument) })
+
+	var verifiedWriteSink chan []byte
+	if verifiedOnlyOutFh != nil {
+		verifiedWriteSink = make(chan []byte, 8<<10)
+		egOuter.Go(func() error { return writeWorker(ctx, verifiedWriteSink, verifiedOnlyOutFh, asSingleDocument) })
+	}
 
 	egInner, ctx := errgroup.WithContext(ctx)
 	wrkCnt := runtime.NumCPU()
@@ -73,6 +84,7 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 
 	egInner.Go(func() error {
 		var cnt atomic.Int64
+		var verifiedCnt atomic.Int64
 
 		// Currently this takes ~2 minutes for a `return nil` noop via a car file 🪦
 		// It should take ~10 seconds instead (based on napking math over tree size, 2.7M blocks)
@@ -143,6 +155,36 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 				case writeSink <- encFin:
 				}
 
+				if dp.VerifiedDeal && verifiedWriteSink != nil {
+					isFirstVerified := (verifiedCnt.Add(1) == 1)
+
+					var encCopy []byte
+					if asSingleDocument {
+						if isFirstVerified {
+							start := 0
+							if len(encFin) > 0 && encFin[0] == ',' {
+								start = 1
+							}
+							encCopy = make([]byte, len(encFin)-start)
+							copy(encCopy, encFin[start:])
+						} else {
+							encCopy = make([]byte, 0, len(encFin)+1)
+							encCopy = append(encCopy, ',')
+							tmp := make([]byte, len(encFin))
+							copy(tmp, encFin)
+							encCopy = append(encCopy, tmp...)
+						}
+					} else {
+						encCopy = make([]byte, len(encFin))
+						copy(encCopy, encFin)
+					}
+
+					select {
+					case <-ctx.Done():
+					case verifiedWriteSink <- encCopy:
+					}
+				}
+
 				return nil
 			})
 			return nil
@@ -151,6 +193,10 @@ func DumpStateF05(ctx context.Context, bg *ipld.CountingBlockGetter, ts *lchtype
 
 	innerErr := egInner.Wait()
 	close(writeSink)
+
+	if verifiedWriteSink != nil {
+		close(verifiedWriteSink)
+	}
 	outerErr := egOuter.Wait()
 
 	if innerErr != nil {
@@ -172,11 +218,11 @@ func writeWorker(ctx context.Context, in <-chan []byte, out io.Writer, asSingleD
 	}()
 
 	if asSingleDocument {
-		if _, err := buf.Write([]byte(`{"id":1,"jsonrpc":"2.0","result":{`)); err != nil {
+		if _, err := buf.Write([]byte(`{`)); err != nil {
 			return err
 		}
 		defer func() {
-			_, err := buf.Write([]byte("}}\n"))
+			_, err := buf.Write([]byte("}\n"))
 			if defErr == nil {
 				defErr = err
 			}
